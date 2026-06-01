@@ -2,16 +2,19 @@
 
 > **This is a multi-GPU fork of [MLI-lab/DeepDeWedge](https://github.com/MLI-lab/DeepDeWedge),** maintained for use with the RELION tomography pipeline. It is functionally identical to upstream apart from the fixes below; it is **not** affiliated with the original authors and is **not** intended to be pushed upstream.
 >
-> **Changes vs upstream:**
-> - **Reliable multi-GPU `fit-model`.** Fixes the sporadic `update_hparam` crash (upstream issue #27: `hparams.yaml` read as `None` while another DDP rank is writing it) with a guarded read + retry. Without this fix, multi-GPU runs crash after the first normalization update. With it, data is sharded across GPUs (each GPU processes ~1/N of the batches per epoch) for near-linear speedup.
+> **Changes vs upstream (two minimal fixes — behavior is otherwise identical to upstream):**
+> - **Reliable multi-GPU `fit-model`.** Fixes the sporadic `update_hparam` crash (upstream issue #27: `hparams.yaml` read as `None` while another DDP rank is writing it) with a guarded read + retry. This is the only change to the training code, and it does **not** alter single-GPU behavior. Multi-GPU fitting itself is the upstream DDP path — set `gpu` to a list of indices.
 > - **Installable with modern setuptools.** Removed the unused `setup_requires=['setuptools_scm']` from `setup.py`, which broke `pip install .` under `setuptools_scm` 10.x (`ModuleNotFoundError: vcs_versioning`).
-> - **Multi-GPU `refine-tomogram`** is provided at the orchestration layer in the RELION wrapper (`relion_run_deepdewedge.py`), which shards the tomogram list across GPUs (one process per GPU). The `ddw refine-tomogram` command itself is unchanged and still uses a single GPU per invocation.
+>
+> `ddw refine-tomogram` is unchanged and uses a single GPU, exactly as upstream.
+>
+> **Note on multi-GPU training dynamics:** with `N` GPUs, DDP shards the data and averages gradients, so the *effective* batch size is `N × batch_size` and there are `~1/N` as many optimizer steps per epoch. This is standard PyTorch DDP behavior, not a per-GPU `batch_size` increase — but it does mean a multi-GPU run is not identical to a single-GPU run at the same `batch_size`/`num_epochs`. For results matching a single-GPU run, either run on one GPU or adjust `batch_size`/learning rate accordingly.
 
 This repository contains an implementation of the DeepDeWedge method as described in the manuscript ["A Deep Learning Method for Simultaneous Denoising and Missing Wedge Reconstruction in Cryogenic Electron Tomography"](https://www.nature.com/articles/s41467-024-51438-y). The implementation comes as a Python package with an accompanying command line interface.
 
 ## Updates
 
-- **Reliable multi-GPU model fitting** (this fork): set the `gpu` argument in the `shared` or `fit_model` section of your `yaml` config to a list of GPU indices (e.g. `gpu: [0, 1, 2, 3]`). The hparams-update race that previously crashed multi-GPU runs is fixed, so fitting is sharded across all GPUs. `ddw refine-tomogram` itself still uses one GPU; multi-GPU refinement is handled by the RELION wrapper by sharding tomograms across GPUs.
+- **Reliable multi-GPU model fitting** (this fork): set the `gpu` argument in the `shared` or `fit_model` section of your `yaml` config to a list of GPU indices (e.g. `gpu: [0, 1, 2, 3]`). The hparams-update race that previously crashed multi-GPU runs is fixed. `ddw refine-tomogram` still uses a single GPU, as upstream.
 
 ## Installation
 The first step is to clone this repository, e.g. via
