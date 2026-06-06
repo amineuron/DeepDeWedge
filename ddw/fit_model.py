@@ -234,6 +234,13 @@ def fit_model(
         process_group_backend=distributed_backend, 
         find_unused_parameters=False,  # setting this to true gave a warning that it might slow things down
     ) if len(devices) > 1 else None
+    # Speed: bf16 mixed precision (RTX 3090+/Ampere; bf16 keeps fp32 range so it is
+    # safe for the Fourier-domain loss), cuDNN autotune for the fixed subtomo size,
+    # and drop the debug-only flags -- deterministic=True forces slow conv kernels
+    # and disables autotune, detect_anomaly=True checks every fwd/bwd op. seed is
+    # still set via seed_everything() above (approximate reproducibility).
+    amp_precision = "bf16" if (torch.cuda.is_available()
+                               and torch.cuda.is_bf16_supported()) else 16
     trainer = pl.Trainer(
         max_epochs=num_epochs,
         accelerator="gpu",
@@ -242,10 +249,11 @@ def fit_model(
         check_val_every_n_epoch=(
             check_val_every_n_epochs if val_data_exists else num_epochs
         ),
-        deterministic=True,
+        precision=amp_precision,
+        deterministic=False,
+        benchmark=True,
         logger=logger,
         callbacks=callbacks,
-        detect_anomaly=True,
         resume_from_checkpoint=resume_from_checkpoint,  # for pytorch-lightning < 2.0
     )
 

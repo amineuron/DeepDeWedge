@@ -6,10 +6,21 @@ from .fourier import get_3d_fft_freqs_on_grid
 from .rotation import rotate_vol_around_axis
 
 
+# The missing-wedge mask is fully determined by (grid_size, mw_angle, device) and
+# is read-only downstream, but building it costs ~0.5 s for a 96^3 grid (and more
+# for the sqrt(2)-enlarged grid used by the rotated mask) and was previously rebuilt
+# for EVERY dataset item, every epoch. Memoize it -> identical output, big speedup.
+_MW_MASK_CACHE = {}
+
+
 def get_missing_wedge_mask(grid_size, mw_angle, device="cpu"):
     """
-    Produces a 3D binary mask with shape 'grid_size', which can be used to zero-out Fourier components that lie inside a missing wedge with width 'mw_angle'.
+    Produces a 3D binary mask with shape 'grid_size', which can be used to zero-out Fourier components that lie inside a missing wedge with width 'mw_angle'. Memoized (see _MW_MASK_CACHE): the result is deterministic in its arguments and used read-only.
     """
+    _key = (tuple(int(s) for s in grid_size), float(mw_angle), str(device))
+    _cached = _MW_MASK_CACHE.get(_key)
+    if _cached is not None:
+        return _cached
     grid = get_3d_fft_freqs_on_grid(grid_size=grid_size, device=device)
     # make normal vectors of two hyperplanes that bound missing wedge
     alpha = torch.deg2rad(torch.tensor(float(mw_angle))) / 2
@@ -28,6 +39,7 @@ def get_missing_wedge_mask(grid_size, mw_angle, device="cpu"):
         grid.inner(normal_left) <= 0, grid.inner(normal_right) <= 0
     ).reshape(list(grid_size))
     mw_mask = torch.logical_and(upper_wedge, lower_wedge).int()
+    _MW_MASK_CACHE[_key] = mw_mask
     return mw_mask
 
 
